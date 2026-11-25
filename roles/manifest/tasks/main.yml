@@ -1,0 +1,37 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Role: manifest                                              ║
+# ║  Generate inventory manifest of the Ark's current contents   ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: Deploy manifest generator
+  ansible.builtin.copy:
+    src: generate_manifest.py
+    dest: "{{ ark_storage_root }}/.generate_manifest.py"
+    mode: "0755"
+
+- name: Generate full Ark manifest
+  ansible.builtin.command: >
+    python3 -I {{ ark_storage_root }}/.generate_manifest.py
+      --storage-root {{ ark_storage_root }}
+      --output {{ ark_manifests_dir }}/ark-manifest.json
+      {{ '--skip-hashes' if ark_manifest_skip_hashes | default(false) else '' }}
+  register: manifest_result
+  changed_when: true
+  timeout: 3600
+
+- name: Display manifest summary
+  ansible.builtin.debug:
+    msg: "{{ manifest_result.stdout_lines[-3:] | join('\n') }}"
+  when: manifest_result.stdout_lines is defined
+
+- name: Generate staging-only manifest (for scan phase)
+  ansible.builtin.command: >
+    python3 -I {{ ark_storage_root }}/.generate_manifest.py
+      --storage-root {{ ark_storage_root }}
+      --output {{ ark_manifests_dir }}/staging-manifest.json
+      --staging-only
+  register: staging_manifest
+  changed_when: true
+  timeout: 1800
+  when: ark_manifest_staging | default(false)

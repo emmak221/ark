@@ -1,0 +1,71 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ark — Offline Linux Repository                             ║
+# ║  General configuration                                      ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# REQUIREMENTS:
+#   This must run on a Debian/Ubuntu host (or in a container).
+#   The APT tools (apt-get, apt-cache, dpkg, reprepro) are
+#   Debian-specific. If your daily driver is NixOS, run this
+#   inside a Podman/Docker container or a VM.
+#
+# QUARTERLY UPDATE WORKFLOW:
+#   1. Connect the storage drive and mount it
+#   2. Run:  ansible-playbook playbooks/update.yml
+#   3. Verify: ansible-playbook playbooks/verify.yml
+#   4. Unmount and store
+#
+# FIRST RUN:
+#   ansible-playbook playbooks/full-sync.yml
+
+# ── Storage paths ──────────────────────────────────────────────
+# Root of the offline repo. Mount your storage drive here.
+ark_storage_root: /mnt/ark
+
+# Subdirectory layout (derived, don't change unless restructuring)
+ark_iso_dir: "{{ ark_storage_root }}/isos"
+ark_apt_repo_dir: "{{ ark_storage_root }}/apt-repo"
+ark_apt_staging_dir: "{{ ark_storage_root }}/.staging/debs"
+ark_toolchain_dir: "{{ ark_storage_root }}/toolchains"
+ark_pip_cache_dir: "{{ ark_storage_root }}/pip-cache"
+ark_manifests_dir: "{{ ark_storage_root }}/manifests"
+
+# ── Target architectures ──────────────────────────────────────
+ark_architectures:
+  - amd64
+  - arm64
+
+# ── Target distributions ──────────────────────────────────────
+# Each entry maps to a reprepro distribution and an upstream
+# mirror to resolve packages against.
+ark_distributions:
+  - codename: noble
+    label: "Ubuntu 24.04 LTS"
+    origin: ubuntu
+    mirror: "http://archive.ubuntu.com/ubuntu"
+    mirror_arm64: "http://ports.ubuntu.com/ubuntu-ports"
+    components: "main universe"
+  # Uncomment to add Debian stable as well:
+  # - codename: bookworm
+  #   label: "Debian 12"
+  #   origin: debian
+  #   mirror: "http://deb.debian.org/debian"
+  #   mirror_arm64: "http://deb.debian.org/debian"
+  #   components: "main contrib"
+
+# ── Repo signing ──────────────────────────────────────────────
+# Generate a GPG key for signing the repo metadata.
+# Set to false to skip signing (target machines use [trusted=yes]).
+ark_sign_repo: false
+ark_gpg_key_name: "Ark Offline Repo Signing Key"
+ark_gpg_key_email: "ark@localhost"
+
+# ── ISO retention ─────────────────────────────────────────────
+# How many previous versions of each ISO to keep alongside current.
+ark_iso_keep_previous: 1
+
+# ── Clean mode ────────────────────────────────────────────────
+# Set by the playbooks. true = wipe and rebuild from scratch.
+# false = incremental update (download new/changed packages only).
+ark_clean: false

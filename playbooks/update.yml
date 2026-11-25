@@ -1,0 +1,81 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ark — Quarterly Update Playbook                             ║
+# ║                                                              ║
+# ║  Incremental update: downloads new/changed packages and      ║
+# ║  ISOs without removing existing ones.                        ║
+# ║                                                              ║
+# ║  Usage:                                                      ║
+# ║    ansible-playbook playbooks/update.yml                     ║
+# ║                                                              ║
+# ║  Before running:                                             ║
+# ║    1. Mount the storage drive at {{ ark_storage_root }}      ║
+# ║    2. Update version numbers in group_vars/all/ as needed    ║
+# ║    3. Add any new packages to packages.yml                   ║
+# ║    4. Update toolchain versions in toolchains.yml            ║
+# ║                                                              ║
+# ║  Estimated time: 30 min - 2 hours depending on changes       ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: "Ark — Quarterly Update"
+  hosts: localhost
+  become: true
+
+  vars:
+    ark_clean: false
+    ark_auto_promote: true   # Quick path — import directly without scan
+
+  pre_tasks:
+    - name: Check storage mount
+      ansible.builtin.stat:
+        path: "{{ ark_storage_root }}/ARK_INFO.txt"
+      register: ark_info
+
+    - name: Verify existing repo
+      ansible.builtin.assert:
+        that: ark_info.stat.exists
+        fail_msg: >
+          No existing Ark repo found at {{ ark_storage_root }}.
+          Run full-sync.yml first, or check that the drive is mounted.
+
+    - name: Show current repo info
+      ansible.builtin.command: cat {{ ark_storage_root }}/ARK_INFO.txt
+      register: repo_info
+      changed_when: false
+
+    - name: Display repo info
+      ansible.builtin.debug:
+        msg: "{{ repo_info.stdout }}"
+
+  roles:
+    - role: setup
+      tags: [setup]
+
+    - role: isos
+      tags: [isos]
+
+    - role: apt_repo
+      tags: [apt]
+
+    - role: toolchains
+      tags: [toolchains]
+
+    - role: pip_cache
+      tags: [pip]
+
+    - role: verify
+      tags: [verify]
+
+  post_tasks:
+    - name: Record update completion
+      ansible.builtin.lineinfile:
+        path: "{{ ark_storage_root }}/ARK_INFO.txt"
+        line: "Updated: {{ ansible_date_time.iso8601 }}"
+        create: true
+        mode: "0644"
+
+    - name: Update summary
+      ansible.builtin.debug:
+        msg: >-
+          Ark update complete. Review the verification report above.
+          Unmount the drive and store it safely.

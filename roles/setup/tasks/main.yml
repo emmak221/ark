@@ -1,0 +1,127 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Role: setup                                                 ║
+# ║  Installs tools, creates directory tree, configures host     ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: Verify we're on a Debian-based system
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: >
+      Ark must run on a Debian/Ubuntu host (needs apt tools).
+      If your machine runs NixOS or another distro, run this
+      inside a Podman/Docker container with Ubuntu.
+
+- name: Install required host tools
+  ansible.builtin.apt:
+    name:
+      - reprepro
+      - dpkg-dev
+      - gnupg
+      - wget
+      - curl
+      - python3
+      - python3-apt
+      - xz-utils
+      - aria2            # parallel downloader for large ISOs
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable arm64 architecture (for cross-arch downloads)
+  ansible.builtin.command: dpkg --add-architecture arm64
+  changed_when: false
+  when: "'arm64' in ark_architectures"
+
+- name: Update apt cache after adding architecture
+  ansible.builtin.apt:
+    update_cache: true
+  when: "'arm64' in ark_architectures"
+
+- name: Create storage directory tree
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ark_storage_root }}"
+    - "{{ ark_iso_dir }}"
+    - "{{ ark_apt_repo_dir }}"
+    - "{{ ark_apt_repo_dir }}/conf"
+    - "{{ ark_apt_staging_dir }}"
+    - "{{ ark_toolchain_dir }}"
+    - "{{ ark_pip_cache_dir }}"
+    - "{{ ark_manifests_dir }}"
+
+- name: Create per-distro staging directories
+  ansible.builtin.file:
+    path: "{{ ark_apt_staging_dir }}/{{ item.0.codename }}-{{ item.1 }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ ark_distributions | product(ark_architectures) | list }}"
+
+- name: Generate GPG signing key (if signing enabled and key missing)
+  when: ark_sign_repo
+  block:
+    - name: Check for existing GPG key
+      ansible.builtin.command: >
+        gpg --list-keys "{{ ark_gpg_key_email }}"
+      register: gpg_check
+      changed_when: false
+      failed_when: false
+
+    - name: Generate GPG key
+      ansible.builtin.command: >
+        gpg --batch --gen-key /dev/stdin
+      args:
+        stdin: |
+          %no-protection
+          Key-Type: RSA
+          Key-Length: 4096
+          Subkey-Type: RSA
+          Subkey-Length: 4096
+          Name-Real: {{ ark_gpg_key_name }}
+          Name-Email: {{ ark_gpg_key_email }}
+          Expire-Date: 0
+          %commit
+      when: gpg_check.rc != 0
+      changed_when: true
+
+    - name: Export public key for target machines
+      ansible.builtin.command: >
+        gpg --armor --export "{{ ark_gpg_key_email }}"
+      register: gpg_pubkey
+      changed_when: false
+
+    - name: Save public key to repo
+      ansible.builtin.copy:
+        content: "{{ gpg_pubkey.stdout }}"
+        dest: "{{ ark_apt_repo_dir }}/repo-key.gpg"
+        mode: "0644"
+
+- name: Write reprepro distributions config
+  ansible.builtin.template:
+    src: "{{ role_path }}/../apt_repo/templates/distributions.j2"
+    dest: "{{ ark_apt_repo_dir }}/conf/distributions"
+    mode: "0644"
+
+- name: Write reprepro options config
+  ansible.builtin.copy:
+    content: |
+      verbose
+      basedir {{ ark_apt_repo_dir }}
+      ask-passphrase
+    dest: "{{ ark_apt_repo_dir }}/conf/options"
+    mode: "0644"
+
+- name: Record setup timestamp
+  ansible.builtin.copy:
+    content: |
+      Ark offline repository
+      Setup completed: {{ ansible_date_time.iso8601 }}
+      Host: {{ ansible_hostname }}
+      Architectures: {{ ark_architectures | join(', ') }}
+      Distributions: {{ ark_distributions | map(attribute='codename') | join(', ') }}
+    dest: "{{ ark_storage_root }}/ARK_INFO.txt"
+    mode: "0644"

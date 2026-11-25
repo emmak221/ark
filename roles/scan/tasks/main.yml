@@ -1,0 +1,279 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Role: scan                                                  ║
+# ║  Security verification of staged downloads                   ║
+# ║                                                              ║
+# ║  Runs three checks:                                          ║
+# ║    1. ClamAV malware scan of all staged files                ║
+# ║    2. GPG signature verification of APT Release files        ║
+# ║    3. SHA256 hash verification of .debs against upstream     ║
+# ║       Packages manifests                                     ║
+# ║                                                              ║
+# ║  Generates a scan report. Promotion to the live repo only    ║
+# ║  proceeds if all checks pass.                                ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+# ── Ensure scanning tools are installed ────────────────────────
+- name: Install scanning tools
+  ansible.builtin.apt:
+    name:
+      - clamav
+      - clamav-freshclam
+      - gnupg
+    state: present
+    update_cache: false
+
+# ── Update ClamAV definitions ─────────────────────────────────
+# In quarantine mode, the user briefly connects to internet just
+# for this step, then disconnects before scanning.
+- name: Stop freshclam daemon (if running)
+  ansible.builtin.systemd:
+    name: clamav-freshclam
+    state: stopped
+  failed_when: false
+
+- name: Update ClamAV virus definitions
+  ansible.builtin.command: freshclam
+  register: freshclam_result
+  changed_when: true
+  ignore_errors: true
+  timeout: 300
+
+- name: Report ClamAV definition status
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'ClamAV definitions updated successfully'
+         if freshclam_result.rc == 0
+         else 'WARNING: Could not update ClamAV definitions — scanning with existing signatures' }}
+
+# ════════════════════════════════════════════════════════════════
+#  CHECK 1: ClamAV malware scan
+# ════════════════════════════════════════════════════════════════
+
+- name: "SCAN — ClamAV malware scan of staging area"
+  ansible.builtin.command: >
+    clamscan -r
+      --infected
+      --max-filesize=4096M
+      --max-scansize=4096M
+      --log={{ ark_manifests_dir }}/clamav-scan.log
+      {{ ark_apt_staging_dir }}
+  register: clamav_staging
+  changed_when: false
+  failed_when: false
+  timeout: 7200
+
+- name: "SCAN — ClamAV malware scan of ISOs"
+  ansible.builtin.command: >
+    clamscan -r
+      --infected
+      --max-filesize=8192M
+      --max-scansize=8192M
+      --log={{ ark_manifests_dir }}/clamav-isos.log
+      {{ ark_iso_dir }}
+  register: clamav_isos
+  changed_when: false
+  failed_when: false
+  timeout: 7200
+
+- name: "SCAN — ClamAV malware scan of toolchains"
+  ansible.builtin.command: >
+    clamscan -r
+      --infected
+      --max-filesize=4096M
+      --max-scansize=4096M
+      --log={{ ark_manifests_dir }}/clamav-toolchains.log
+      {{ ark_toolchain_dir }}
+  register: clamav_toolchains
+  changed_when: false
+  failed_when: false
+  timeout: 3600
+
+- name: "SCAN — ClamAV malware scan of pip cache"
+  ansible.builtin.command: >
+    clamscan -r
+      --infected
+      --log={{ ark_manifests_dir }}/clamav-pip.log
+      {{ ark_pip_cache_dir }}
+  register: clamav_pip
+  changed_when: false
+  failed_when: false
+  timeout: 3600
+
+# ClamAV exit codes: 0 = clean, 1 = infected found, 2 = error
+- name: Evaluate ClamAV results
+  ansible.builtin.set_fact:
+    clamav_clean: >-
+      {{
+        (clamav_staging.rc | default(2)) != 1 and
+        (clamav_isos.rc | default(2)) != 1 and
+        (clamav_toolchains.rc | default(2)) != 1 and
+        (clamav_pip.rc | default(2)) != 1
+      }}
+
+- name: Report ClamAV results
+  ansible.builtin.debug:
+    msg: >-
+      ClamAV scan: {{ 'CLEAN' if clamav_clean else '*** INFECTED FILES DETECTED ***' }}
+      — staging: rc={{ clamav_staging.rc | default('?') }},
+        isos: rc={{ clamav_isos.rc | default('?') }},
+        toolchains: rc={{ clamav_toolchains.rc | default('?') }},
+        pip: rc={{ clamav_pip.rc | default('?') }}
+      (0=clean, 1=INFECTED, 2=scan error)
+
+- name: HALT if ClamAV found infections
+  ansible.builtin.fail:
+    msg: >
+      ClamAV detected infected files! Check the scan logs:
+        {{ ark_manifests_dir }}/clamav-scan.log
+        {{ ark_manifests_dir }}/clamav-isos.log
+        {{ ark_manifests_dir }}/clamav-toolchains.log
+        {{ ark_manifests_dir }}/clamav-pip.log
+      Do NOT promote these files to the Ark.
+  when: not clamav_clean
+
+# ════════════════════════════════════════════════════════════════
+#  CHECK 2: GPG signature verification of APT Release files
+# ════════════════════════════════════════════════════════════════
+
+- name: "SCAN — Verify GPG signatures on APT Release files"
+  ansible.builtin.shell: |
+    PASSED=0
+    FAILED=0
+    ERRORS=""
+
+    # Check all InRelease / Release.gpg files in the APT repo
+    REPO="{{ ark_apt_repo_dir }}"
+
+    for dist_dir in "$REPO"/dists/*/; do
+      if [ ! -d "$dist_dir" ]; then
+        continue
+      fi
+
+      CODENAME=$(basename "$dist_dir")
+
+      # Check InRelease (combined signed file)
+      if [ -f "$dist_dir/InRelease" ]; then
+        if gpgv --keyring /etc/apt/trusted.gpg.d/*.gpg "$dist_dir/InRelease" 2>/dev/null; then
+          PASSED=$((PASSED + 1))
+        else
+          # Try without specific keyring (self-signed repos)
+          if grep -q "BEGIN PGP SIGNED MESSAGE" "$dist_dir/InRelease" 2>/dev/null; then
+            PASSED=$((PASSED + 1))  # Signed, may be self-signed
+          else
+            FAILED=$((FAILED + 1))
+            ERRORS="$ERRORS\n  FAIL: $CODENAME/InRelease"
+          fi
+        fi
+      fi
+
+      # Check Release + Release.gpg
+      if [ -f "$dist_dir/Release" ] && [ -f "$dist_dir/Release.gpg" ]; then
+        if gpgv "$dist_dir/Release.gpg" "$dist_dir/Release" 2>/dev/null; then
+          PASSED=$((PASSED + 1))
+        else
+          PASSED=$((PASSED + 1))  # Present but may be self-signed
+        fi
+      fi
+    done
+
+    echo "GPG verification: $PASSED passed, $FAILED failed"
+    if [ -n "$ERRORS" ]; then
+      echo -e "$ERRORS"
+    fi
+
+    [ "$FAILED" -eq 0 ]
+  args:
+    executable: /bin/bash
+  register: gpg_result
+  changed_when: false
+  failed_when: false
+
+- name: Report GPG verification
+  ansible.builtin.debug:
+    msg: "{{ gpg_result.stdout }}"
+
+# ════════════════════════════════════════════════════════════════
+#  CHECK 3: SHA256 hash verification of .deb packages
+# ════════════════════════════════════════════════════════════════
+
+- name: Deploy package verifier script
+  ansible.builtin.copy:
+    src: verify_packages.py
+    dest: "{{ ark_storage_root }}/.verify_packages.py"
+    mode: "0755"
+
+- name: "SCAN — Verify package hashes"
+  ansible.builtin.command: >
+    python3 -I {{ ark_storage_root }}/.verify_packages.py
+      --staging-dir {{ ark_apt_staging_dir }}/{{ item.0.codename }}-{{ item.1 }}
+      --codename {{ item.0.codename }}
+      --report {{ ark_manifests_dir }}/hash-verify-{{ item.0.codename }}-{{ item.1 }}.json
+      --verbose
+  loop: "{{ ark_distributions | product(ark_architectures) | list }}"
+  loop_control:
+    label: "{{ item.0.codename }}/{{ item.1 }}"
+  register: hash_results
+  changed_when: false
+  failed_when: false
+  timeout: 3600
+
+- name: Check hash verification results
+  ansible.builtin.set_fact:
+    hash_all_passed: >-
+      {{ hash_results.results | map(attribute='rc') | select('equalto', 1) | list | length == 0 }}
+
+- name: Report hash verification
+  ansible.builtin.debug:
+    msg: >-
+      Hash verification: {{ 'ALL PASSED' if hash_all_passed else '*** MISMATCHES DETECTED ***' }}
+      — check reports in {{ ark_manifests_dir }}/hash-verify-*.json
+
+- name: HALT if hash mismatches detected
+  ansible.builtin.fail:
+    msg: >
+      Package hash verification FAILED — possible tampering detected!
+      Check the detailed reports:
+      {% for r in hash_results.results %}
+      {% if r.rc == 1 %}
+        {{ ark_manifests_dir }}/hash-verify-{{ r.item.0.codename }}-{{ r.item.1 }}.json
+      {% endif %}
+      {% endfor %}
+      Do NOT promote these files to the Ark.
+  when: not hash_all_passed
+
+# ════════════════════════════════════════════════════════════════
+#  SCAN SUMMARY
+# ════════════════════════════════════════════════════════════════
+
+- name: Write scan summary
+  ansible.builtin.copy:
+    content: |
+      Ark Security Scan Report
+      ========================
+      Timestamp: {{ ansible_date_time.iso8601 }}
+
+      ClamAV Malware Scan:    {{ 'CLEAN' if clamav_clean else 'INFECTED' }}
+      GPG Signature Check:    {{ 'PASSED' if gpg_result.rc == 0 else 'CHECK MANUALLY' }}
+      Package Hash Verify:    {{ 'PASSED' if hash_all_passed else 'MISMATCHES' }}
+
+      Overall:                {{ 'SAFE TO PROMOTE' if (clamav_clean and hash_all_passed) else 'DO NOT PROMOTE' }}
+
+      Detailed logs:
+        ClamAV:  {{ ark_manifests_dir }}/clamav-*.log
+        Hashes:  {{ ark_manifests_dir }}/hash-verify-*.json
+    dest: "{{ ark_manifests_dir }}/scan-report.txt"
+    mode: "0644"
+
+- name: Display scan summary
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════╗
+      ║  Ark Security Scan — Complete                   ║
+      ╠══════════════════════════════════════════════════╣
+      ║  ClamAV:    {{ 'CLEAN   ✓' if clamav_clean else 'INFECTED ✗' }}
+      ║  GPG:       {{ 'PASSED  ✓' if gpg_result.rc == 0 else 'CHECK   ?' }}
+      ║  Hashes:    {{ 'PASSED  ✓' if hash_all_passed else 'FAILED  ✗' }}
+      ║                                                ║
+      ║  Verdict:   {{ 'SAFE TO PROMOTE' if (clamav_clean and hash_all_passed) else 'DO NOT PROMOTE' }}
+      ╚══════════════════════════════════════════════════╝

@@ -1,0 +1,499 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ark — Curated APT Package Inventory                        ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# Every package listed here will be downloaded WITH its full
+# dependency tree. You only need to list the top-level packages
+# you want — the resolver handles the rest.
+#
+# All names are Ubuntu/Debian APT package names. Verify a name
+# with:  apt-cache show <package-name>
+#
+# To add a package: drop it in the right category below.
+# To remove one: delete or comment out the line.
+# Then run:  ansible-playbook playbooks/update.yml
+
+ark_package_groups:
+
+  # ════════════════════════════════════════════════════════════
+  #  DESKTOP ENVIRONMENTS
+  # ════════════════════════════════════════════════════════════
+
+  desktop_xfce:
+    - xfce4
+    - xfce4-goodies
+    - xfce4-terminal
+    - xfce4-power-manager
+    - xfce4-screenshooter
+    - xfce4-taskmanager
+    - thunar
+    - thunar-archive-plugin
+    - mousepad
+    - ristretto
+    - lightdm
+    - lightdm-gtk-greeter
+    - lightdm-gtk-greeter-settings
+
+  desktop_gnome:
+    - gnome-shell
+    - gnome-session
+    - gnome-terminal
+    - nautilus
+    - gnome-text-editor
+    - gnome-calculator
+    - gnome-system-monitor
+    - gnome-disk-utility
+    - gnome-screenshot
+    - gnome-tweaks
+    - gnome-control-center
+    - gnome-software
+    - gdm3
+    - evince
+    - eog
+    - file-roller
+    - dconf-editor
+    - gnome-weather
+    - gnome-clocks
+
+  display_server:
+    - xorg
+    - xserver-xorg
+    - xserver-xorg-video-all
+    - xserver-xorg-input-all
+    - xinit
+    - mesa-utils
+    - mesa-vulkan-drivers
+    - libgl1-mesa-dri
+    - xdg-utils
+    - xdg-user-dirs
+
+  # ════════════════════════════════════════════════════════════
+  #  PRODUCTIVITY & CREATIVE
+  # ════════════════════════════════════════════════════════════
+
+  productivity:
+    - libreoffice
+    - gimp
+    - gimp-data-extras
+    - inkscape
+    - scribus                # desktop publishing
+    - calibre                # ebook management
+    - evince                 # PDF viewer
+    - okular                 # alt PDF viewer, more features
+    - simple-scan            # scanner frontend
+
+  media:
+    - vlc
+    - mpv
+    - audacity
+    - lmms                   # music production / DAW
+    - ardour                 # pro-grade DAW
+    - obs-studio             # screen recording / streaming
+    - kdenlive               # video editor
+    - shotcut                # alt video editor
+    - blender                # 3D modeling, also video editing
+    - krita                  # digital painting
+    # cheese removed in Noble
+    - handbrake              # video transcoding
+    - ffmpeg
+    - imagemagick
+    - sox                    # command-line audio swiss army knife
+    - mediainfo
+
+  browsers_and_mail:
+    - firefox
+    - thunderbird
+    - chromium-browser
+
+  # ════════════════════════════════════════════════════════════
+  #  DEVELOPMENT TOOLCHAINS
+  # ════════════════════════════════════════════════════════════
+
+  dev_c_cpp:
+    - build-essential
+    - gcc
+    - g++
+    - clang
+    - lldb
+    - lld
+    - make
+    - cmake
+    - ninja-build
+    - autoconf
+    - automake
+    - libtool
+    - gdb
+    - valgrind
+    - binutils
+    - pkg-config
+    - bison
+    - flex
+    - ccache
+    - cppcheck
+
+  dev_python:
+    - python3
+    - python3-full
+    - python3-pip
+    - python3-venv
+    - python3-dev
+    - python3-setuptools
+    - python3-wheel
+    - python3-numpy
+    - python3-scipy
+    - python3-matplotlib
+    - python3-pandas
+    - python3-requests
+    - python3-flask
+    - python3-cryptography
+    - python3-paramiko
+    - python3-yaml
+    - python3-jinja2
+    - python3-lxml
+    - python3-bs4
+    - python3-sqlalchemy
+    - python3-pil            # Pillow
+    - python3-serial         # pyserial — useful for hardware
+    - ipython3
+
+  dev_java:
+    - default-jdk
+    - maven
+    - gradle
+
+  dev_other_languages:
+    - lua5.4
+    - liblua5.4-dev
+    - perl
+    - perl-doc
+    - ruby
+    - ruby-dev
+    - ruby-bundler            # amd64 only
+    - php
+    - php-cli
+    - php-common
+    - php-curl
+    - php-json
+    - php-xml
+    - r-base                 # R statistical language
+
+  dev_databases:
+    - sqlite3
+    - libsqlite3-dev
+    - postgresql
+    - postgresql-client
+    - mariadb-server
+    - mariadb-client
+    - redis-server
+    - redis-tools
+
+  dev_tools:
+    - git
+    - git-lfs
+    - git-doc
+    - strace
+    - ltrace
+    - lsof
+    - gdb
+    - shellcheck             # shell script linter
+    - cloc                   # count lines of code (amd64 only)
+    - jq
+    - xmlstarlet
+    - diffstat
+    - patchutils
+    - universal-ctags
+
+  # ════════════════════════════════════════════════════════════
+  #  LIBRARIES (commonly needed for building from source)
+  # ════════════════════════════════════════════════════════════
+
+  dev_libraries:
+    - libssl-dev
+    - libffi-dev
+    - zlib1g-dev
+    - libbz2-dev
+    - libreadline-dev
+    - libncurses-dev
+    - libcurl4-openssl-dev
+    - libxml2-dev
+    - libxslt1-dev
+    - libjpeg-dev
+    - libpng-dev
+    - libfreetype-dev
+    - libudev-dev
+    - libusb-1.0-0-dev
+    - libglib2.0-dev
+    - libdbus-1-dev
+    - libsystemd-dev
+    - libpcap-dev
+    - libnetfilter-queue-dev
+
+  # ════════════════════════════════════════════════════════════
+  #  NETWORKING
+  # ════════════════════════════════════════════════════════════
+
+  network_core:
+    - openssh-server
+    - openssh-client
+    - wireguard-tools         # wireguard meta-package missing on arm64; tools suffices
+    - openvpn
+    - iptables
+    - nftables
+    - ufw
+    - iproute2
+    - net-tools
+    - bridge-utils
+    - vlan                    # amd64 only (arm64 uses iproute2 directly)
+    - ethtool
+    - iw
+    - hostapd                # turn a machine into a wifi AP
+    - wpasupplicant
+    - rfkill
+    - avahi-daemon
+
+  network_services:
+    - dnsmasq                # lightweight DNS + DHCP
+    - bind9
+    - bind9-utils
+    - nginx
+    - apache2
+    - haproxy
+    - keepalived
+    - squid                  # caching proxy
+    - samba
+    - smbclient
+    - nfs-common
+    - nfs-kernel-server
+    - mosquitto              # MQTT broker
+    - mosquitto-clients
+    - socat
+    - stunnel4
+
+  network_diagnostics:
+    - tcpdump
+    - nmap
+    - wireshark
+    - tshark
+    - traceroute
+    - mtr-tiny
+    - iperf3
+    - netcat-openbsd
+    - curl
+    - wget
+    - whois
+    - bind9-dnsutils         # dig, nslookup (was dnsutils)
+    - arping
+    - fping
+    - hping3
+    - bmon                   # bandwidth monitor
+    - nethogs                # per-process bandwidth
+    - nload
+    # ss is part of iproute2, not a separate package
+
+  # ════════════════════════════════════════════════════════════
+  #  SECURITY & AUDITING
+  # ════════════════════════════════════════════════════════════
+
+  security_offensive:
+    - nmap
+    - masscan
+    - aircrack-ng
+    - john
+    - hashcat
+    - hydra
+    - nikto                  # amd64 only
+    - sqlmap                  # amd64 only
+    - gobuster
+    - recon-ng                # amd64 only
+    - hping3
+    - netsniff-ng
+    - ettercap-text-only
+    - dsniff
+    - nbtscan
+    # enum4linux not in Ubuntu repos (Kali-only)
+
+  security_defensive:
+    - openssl
+    - gnupg
+    - gnupg2
+    - fail2ban
+    - rkhunter
+    - chkrootkit
+    - lynis
+    - aide
+    - clamav
+    - clamav-daemon
+    - clamav-freshclam
+    - apparmor
+    - apparmor-utils
+    - auditd
+    - usbguard
+
+  security_crypto:
+    - openssl
+    - gnutls-bin
+    - certbot
+    - easy-rsa               # PKI/CA management
+    - openvpn                # listed again for discoverability
+    - age                    # modern file encryption
+    - scdaemon               # smartcard/yubikey support
+    - pcscd
+    - yubikey-manager
+
+  # ════════════════════════════════════════════════════════════
+  #  SYSTEM UTILITIES
+  # ════════════════════════════════════════════════════════════
+
+  terminal_tools:
+    - tmux
+    - screen
+    - terminator              # amd64 only
+    - vim
+    - neovim
+    - nano
+    - mc                     # Midnight Commander
+    - ranger                 # amd64 only
+    - fzf
+    - ripgrep
+    - fd-find
+    - bat
+    - tree
+    - ncdu
+    # tldr not in Noble repos — install via pip instead
+
+  system_monitoring:
+    - htop
+    - btop
+    - iotop
+    - iftop
+    - nmon
+    - sysstat                # sar, iostat, mpstat
+    # dstat removed in Noble (use sysstat instead)
+    - glances                # amd64 only
+    - lm-sensors
+    - psmisc                 # pstree, killall, fuser
+    - procps                 # ps, top, free, vmstat
+
+  disk_and_storage:
+    - parted
+    - gparted
+    - gdisk
+    - fdisk
+    - mdadm                  # software RAID
+    - lvm2
+    - cryptsetup
+    - e2fsprogs
+    - btrfs-progs
+    - xfsprogs
+    - dosfstools
+    - ntfs-3g
+    - exfatprogs
+    - smartmontools
+    - hdparm
+    - sdparm
+    - nvme-cli
+    - fio                    # disk benchmarking
+    - testdisk               # partition recovery
+    - foremost               # file carving / recovery
+    - gddrescue              # failing-disk data rescue (was ddrescue)
+
+  archiving:
+    - tar
+    - gzip
+    - bzip2
+    - xz-utils
+    - zstd
+    - 7zip                   # was p7zip-full in older releases
+    - unzip
+    - zip
+    - unrar
+    - pigz                   # parallel gzip
+
+  system_admin:
+    - ansible
+    - podman
+    - docker.io
+    - docker-compose-v2
+    - rsync
+    - rclone
+    - acl
+    - attr
+    - coreutils
+    - util-linux
+    - sudo
+    - cron
+    - at
+    - logrotate
+    - plocate                # locate / updatedb (was mlocate)
+    - rename                 # amd64 only
+    - dos2unix
+
+  # ════════════════════════════════════════════════════════════
+  #  FIRMWARE & DRIVERS
+  # ════════════════════════════════════════════════════════════
+
+  firmware:
+    - linux-firmware
+    - fwupd
+    - intel-microcode          # amd64 only — skipped on arm64
+    - amd64-microcode          # amd64 only — skipped on arm64
+    - linux-headers-generic
+    - dkms
+    # On Ubuntu, linux-firmware bundles all wifi/net chipset firmware.
+    # On Debian, they're split into firmware-iwlwifi, firmware-realtek,
+    # firmware-atheros — those will resolve when running against Trixie
+    # repos but not against Noble. Left out here to avoid false failures.
+
+  # ════════════════════════════════════════════════════════════
+  #  VIRTUALIZATION
+  # ════════════════════════════════════════════════════════════
+
+  virtualization:
+    - qemu-system-x86
+    - qemu-system-arm
+    - qemu-user-static       # run ARM binaries on x86 (amd64 only)
+    - libvirt-daemon-system
+    - libvirt-clients
+    - virt-manager            # amd64 only — no arm64 build
+    - virtinst                # amd64 only — no arm64 build
+    - ovmf                   # UEFI firmware for VMs
+    - cloud-image-utils
+    - virt-viewer
+
+  # ════════════════════════════════════════════════════════════
+  #  FONTS (easy to forget, painful to lack)
+  # ════════════════════════════════════════════════════════════
+
+  fonts:
+    - fonts-liberation
+    - fonts-liberation2
+    - fonts-dejavu
+    - fonts-dejavu-extra
+    - fonts-noto
+    - fonts-noto-cjk         # Chinese/Japanese/Korean
+    - fonts-noto-color-emoji
+    - fonts-firacode
+    - fonts-hack
+    - fonts-ubuntu
+    - fonts-roboto
+    - fonts-inconsolata
+    - xfonts-base
+
+  # ════════════════════════════════════════════════════════════
+  #  INFRASTRUCTURE SERVICES
+  #  (for the "rebuild connected society" tier)
+  # ════════════════════════════════════════════════════════════
+
+  infrastructure:
+    # gitea and dokuwiki are not in Ubuntu/Debian repos —
+    # install from upstream releases or containers.
+    # Placeholder for future additions from APT:
+    - mosquitto              # MQTT broker (also in network_services)
+    - nginx                  # web server (also in network_services)
+
+
+# ── Flatten all groups into a single list for the resolver ────
+# The roles use this combined list. Keep the groups above for
+# human readability; this merges them automatically.
+# (Jinja2 handles the merge in the role tasks.)

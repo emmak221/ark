@@ -1,0 +1,182 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Role: verify                                                ║
+# ║  Verify integrity and report on the offline repo             ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: "── Verification Report ──"
+  ansible.builtin.debug:
+    msg: "Starting Ark integrity verification..."
+
+# ── Check storage root exists ──────────────────────────────────
+- name: Verify storage root
+  ansible.builtin.stat:
+    path: "{{ ark_storage_root }}"
+  register: storage_check
+
+- name: Fail if storage not mounted
+  ansible.builtin.assert:
+    that: storage_check.stat.exists
+    fail_msg: "Storage root {{ ark_storage_root }} not found — is the drive mounted?"
+
+# ── ISO verification ───────────────────────────────────────────
+- name: Find ISO files
+  ansible.builtin.find:
+    paths: "{{ ark_iso_dir }}"
+    patterns: "*.iso,*.img,*.img.xz"
+    recurse: true
+  register: iso_files
+
+- name: Report ISO count
+  ansible.builtin.debug:
+    msg: "ISOs found: {{ iso_files.matched }}"
+
+- name: Verify ISOs against checksums (where available)
+  ansible.builtin.shell: |
+    set -o pipefail
+    CHECKED=0
+    PASSED=0
+    FAILED=0
+    NOCHECK=0
+
+    for dir in {{ ark_iso_dir }}/*/; do
+      if [ ! -f "$dir/SHA256SUMS" ]; then
+        NOCHECK=$((NOCHECK + 1))
+        continue
+      fi
+
+      cd "$dir"
+      while IFS= read -r line; do
+        HASH=$(echo "$line" | awk '{print $1}')
+        FILE=$(echo "$line" | awk '{print $2}' | sed 's/^\*//')
+
+        if [ -f "$FILE" ]; then
+          CHECKED=$((CHECKED + 1))
+          ACTUAL=$(sha256sum "$FILE" | awk '{print $1}')
+          if [ "$HASH" = "$ACTUAL" ]; then
+            PASSED=$((PASSED + 1))
+          else
+            FAILED=$((FAILED + 1))
+            echo "MISMATCH: $dir$FILE"
+          fi
+        fi
+      done < SHA256SUMS
+    done
+
+    echo "ISO verification: $CHECKED checked, $PASSED passed, $FAILED FAILED, $NOCHECK dirs without checksums"
+  args:
+    executable: /bin/bash
+  register: iso_verify
+  changed_when: false
+
+- name: Report ISO verification
+  ansible.builtin.debug:
+    msg: "{{ iso_verify.stdout_lines | last }}"
+
+# ── APT repository verification ────────────────────────────────
+- name: Check reprepro repo integrity
+  ansible.builtin.command: >
+    reprepro -b {{ ark_apt_repo_dir }} check
+  register: repo_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Report APT repo status
+  ansible.builtin.debug:
+    msg: "APT repo check: {{ 'PASSED' if repo_check.rc == 0 else 'ISSUES FOUND — run reprepro check manually' }}"
+
+- name: Count packages per distribution
+  ansible.builtin.command: >
+    reprepro -b {{ ark_apt_repo_dir }} list {{ item.codename }}
+  loop: "{{ ark_distributions }}"
+  loop_control:
+    label: "{{ item.codename }}"
+  register: package_counts
+  changed_when: false
+  ignore_errors: true
+
+- name: Report package counts
+  ansible.builtin.debug:
+    msg: "{{ item.item.codename }}: {{ item.stdout_lines | length }} packages"
+  loop: "{{ package_counts.results }}"
+  loop_control:
+    label: "{{ item.item.codename }}"
+
+# ── Toolchain verification ─────────────────────────────────────
+- name: Find toolchain archives
+  ansible.builtin.find:
+    paths: "{{ ark_toolchain_dir }}"
+    patterns: "*.tar.gz,*.tar.xz"
+    recurse: true
+  register: toolchain_files
+
+- name: Verify toolchain archives are valid
+  ansible.builtin.shell: |
+    GOOD=0
+    BAD=0
+    for f in $(find {{ ark_toolchain_dir }} -name '*.tar.gz' -o -name '*.tar.xz' 2>/dev/null); do
+      if tar -tf "$f" >/dev/null 2>&1; then
+        GOOD=$((GOOD + 1))
+      else
+        BAD=$((BAD + 1))
+        echo "CORRUPT: $f"
+      fi
+    done
+    echo "Toolchains: $GOOD valid, $BAD corrupt"
+  args:
+    executable: /bin/bash
+  register: toolchain_verify
+  changed_when: false
+
+- name: Report toolchain verification
+  ansible.builtin.debug:
+    msg: "{{ toolchain_verify.stdout_lines | last }}"
+
+# ── Pip cache verification ─────────────────────────────────────
+- name: Count pip cache files
+  ansible.builtin.find:
+    paths: "{{ ark_pip_cache_dir }}"
+    patterns: "*.whl,*.tar.gz,*.zip"
+    recurse: true
+  register: pip_cache_files
+
+- name: Report pip cache
+  ansible.builtin.debug:
+    msg: "Pip cache: {{ pip_cache_files.matched }} files"
+
+# ── Overall size report ────────────────────────────────────────
+- name: Get total storage usage
+  ansible.builtin.command: du -sh {{ ark_storage_root }}
+  register: total_size
+  changed_when: false
+
+- name: Get breakdown by component
+  ansible.builtin.command: du -sh {{ item }}
+  loop:
+    - "{{ ark_iso_dir }}"
+    - "{{ ark_apt_repo_dir }}"
+    - "{{ ark_toolchain_dir }}"
+    - "{{ ark_pip_cache_dir }}"
+  register: component_sizes
+  changed_when: false
+  ignore_errors: true
+
+- name: "── Summary ──"
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════╗
+      ║  Ark Offline Repository — Verification Report   ║
+      ╠══════════════════════════════════════════════════╣
+      ║  Total size:   {{ total_size.stdout.split('\t')[0] | default('unknown') }}
+      ║  ISOs:         {{ iso_files.matched }} files
+      ║  APT repo:     {{ repo_check.rc == 0 | ternary('healthy', 'needs attention') }}
+      ║  Toolchains:   {{ toolchain_files.matched }} archives
+      ║  Pip cache:    {{ pip_cache_files.matched }} files
+      ╚══════════════════════════════════════════════════╝
+
+- name: Write verification timestamp
+  ansible.builtin.lineinfile:
+    path: "{{ ark_storage_root }}/ARK_INFO.txt"
+    line: "Last verified: {{ ansible_date_time.iso8601 }}"
+    create: true
+    mode: "0644"

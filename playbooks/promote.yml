@@ -1,0 +1,63 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ark — Phase 3: Promote                                     ║
+# ║                                                              ║
+# ║  QUARANTINE WORKFLOW — Step 3 of 3                           ║
+# ║                                                              ║
+# ║  Run this on the INTERMEDIARY MACHINE with ONLY the Ark      ║
+# ║  storage drive connected. NOT the internet.                  ║
+# ║                                                              ║
+# ║  This imports scanned, verified packages from the staging    ║
+# ║  area into the live Ark repository. It will REFUSE to run    ║
+# ║  if the scan report doesn't show a pass.                     ║
+# ║                                                              ║
+# ║  Usage:                                                      ║
+# ║    sudo ansible-playbook playbooks/promote.yml \             ║
+# ║      -e "ark_storage_root=/path/to/staging"                  ║
+# ║                                                              ║
+# ║  To skip the scan requirement (not recommended):             ║
+# ║    -e "ark_require_scan=false"                               ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: "Ark — Phase 3: Promote to Live Repo"
+  hosts: localhost
+  become: true
+
+  pre_tasks:
+    - name: Confirm promotion
+      ansible.builtin.pause:
+        prompt: >-
+          Ready to promote scanned packages to the live Ark repo.
+          This will import verified .debs into reprepro.
+          The Ark storage should be mounted at {{ ark_storage_root }}.
+          Press Enter to proceed, or Ctrl-C to abort.
+
+  roles:
+    - role: promote
+      tags: [promote]
+
+    - role: verify
+      tags: [verify]
+
+  post_tasks:
+    - name: Update status file
+      ansible.builtin.copy:
+        content: |
+          Last full cycle completed: {{ ansible_date_time.iso8601 }}
+          Status: PROMOTED — Ark is up to date
+          Workflow: download → quarantine → scan → promote ✓
+        dest: "{{ ark_storage_root }}/.download-status"
+        mode: "0644"
+
+    - name: Promotion complete
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════╗
+          ║  Phase 3: Promote — COMPLETE                    ║
+          ╠══════════════════════════════════════════════════╣
+          ║  Scanned packages imported to live repo.        ║
+          ║  Ark is up to date and verified.                ║
+          ║                                                 ║
+          ║  Safe to unmount the storage drive and store    ║
+          ║  it in a secure location.                       ║
+          ╚══════════════════════════════════════════════════╝

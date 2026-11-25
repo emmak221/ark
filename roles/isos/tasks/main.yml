@@ -1,0 +1,136 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Role: isos                                                  ║
+# ║  Download and verify ISO/image files                         ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: Create ISO directories
+  ansible.builtin.file:
+    path: "{{ ark_iso_dir }}/{{ item.name }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ ark_isos }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ── Download checksum files first ──────────────────────────────
+- name: Download checksum files
+  ansible.builtin.get_url:
+    url: "{{ item.checksum_url }}"
+    dest: "{{ ark_iso_dir }}/{{ item.name }}/SHA256SUMS"
+    mode: "0644"
+    force: true
+    timeout: 60
+  loop: "{{ ark_isos | selectattr('checksum_url', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  ignore_errors: true
+  register: checksum_downloads
+
+# ── Download ISOs ──────────────────────────────────────────────
+# Uses wget for all downloads (handles redirects better than aria2c,
+# especially for SourceForge). Falls back to curl if wget is missing.
+
+- name: "Download ISO"
+  ansible.builtin.shell: |
+    set -e
+    DEST_DIR="{{ ark_iso_dir }}/{{ item.name }}"
+    URL="{{ item.url }}"
+    FILENAME=$(basename "$URL" | sed 's|/download$||')
+
+    # If file exists and matches checksum, skip
+    if [ -f "$DEST_DIR/$FILENAME" ] && [ -f "$DEST_DIR/SHA256SUMS" ]; then
+      cd "$DEST_DIR"
+      if grep "$FILENAME" SHA256SUMS | sha256sum --check --status 2>/dev/null; then
+        echo "UNCHANGED — checksum matches, skipping download"
+        exit 0
+      fi
+    fi
+
+    # If file exists (no checksum to verify), skip unless forced
+    if [ -f "$DEST_DIR/$FILENAME" ]; then
+      echo "UNCHANGED — file exists (no checksum verification)"
+      exit 0
+    fi
+
+    # Rotate previous version if keeping history
+    if [ -f "$DEST_DIR/$FILENAME" ] && [ "{{ ark_iso_keep_previous }}" -gt 0 ]; then
+      TIMESTAMP=$(date -r "$DEST_DIR/$FILENAME" +%Y%m%d)
+      mkdir -p "$DEST_DIR/old"
+      mv "$DEST_DIR/$FILENAME" "$DEST_DIR/old/${FILENAME}.${TIMESTAMP}" 2>/dev/null || true
+    fi
+
+    # Download — progress is written to a log file you can tail:
+    #   tail -f /tmp/ark-iso-download.log
+    LOGFILE="/tmp/ark-iso-download.log"
+    echo "$(date '+%H:%M:%S') Starting download: $FILENAME" >> "$LOGFILE"
+    echo "$(date '+%H:%M:%S') URL: $URL" >> "$LOGFILE"
+
+    # Use wget — it handles SourceForge and other redirect chains reliably
+    wget --continue \
+      --output-document="$DEST_DIR/$FILENAME" \
+      --progress=dot:mega \
+      --content-disposition \
+      --max-redirect=10 \
+      "$URL" 2>&1 | tee -a "$LOGFILE"
+
+    echo "$(date '+%H:%M:%S') DOWNLOADED — $FILENAME" | tee -a "$LOGFILE"
+  args:
+    executable: /bin/bash
+  loop: "{{ ark_isos }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: iso_downloads
+  changed_when: "'DOWNLOADED' in (iso_downloads.stdout | default(''))"
+  timeout: 7200
+  ignore_errors: true
+
+- name: Report ISO download results
+  ansible.builtin.debug:
+    msg: "{{ item.item.name }}: {{ item.stdout_lines | last | default('unknown') }}"
+  loop: "{{ iso_downloads.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: iso_downloads is defined
+
+# ── Clean up old rotated versions ──────────────────────────────
+# Old versions are stored in an "old/" subdirectory by the rotation
+# logic above. This avoids accidentally deleting actual image files
+# (like .img.gz or .img.xz) that have dots in their real filenames.
+- name: Find old rotated versions
+  ansible.builtin.find:
+    paths: "{{ ark_iso_dir }}/{{ item.name }}/old"
+    file_type: file
+  loop: "{{ ark_isos }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: old_isos
+  ignore_errors: true
+
+- name: Remove excess old versions
+  ansible.builtin.file:
+    path: "{{ item.1.path }}"
+    state: absent
+  loop: >-
+    {{
+      old_isos.results
+      | selectattr('files', 'defined')
+      | subelements('files', skip_missing=True)
+      | sort(attribute='1.mtime')
+      | reverse
+      | list
+    }}
+  loop_control:
+    label: "{{ item.1.path | basename }}"
+  when:
+    - old_isos.results is defined
+    - item.1 is defined
+
+- name: Report ISO directory size
+  ansible.builtin.command: du -sh {{ ark_iso_dir }}
+  register: iso_size
+  changed_when: false
+
+- name: Display ISO size
+  ansible.builtin.debug:
+    msg: "ISO archive size: {{ iso_size.stdout.split('\t')[0] }}"

@@ -1,0 +1,112 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Role: promote                                               ║
+# ║  Move scanned-and-verified packages from staging to the      ║
+# ║  live Ark repository. Only runs after scan passes.           ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+# ── Pre-flight: check that scan passed ─────────────────────────
+- name: Check for scan report
+  ansible.builtin.stat:
+    path: "{{ ark_manifests_dir }}/scan-report.txt"
+  register: scan_report_file
+
+- name: Read scan report
+  ansible.builtin.slurp:
+    src: "{{ ark_manifests_dir }}/scan-report.txt"
+  register: scan_report_content
+  when: scan_report_file.stat.exists
+
+- name: Verify scan passed before promoting
+  ansible.builtin.assert:
+    that:
+      - scan_report_file.stat.exists
+      - "'SAFE TO PROMOTE' in (scan_report_content.content | b64decode)"
+    fail_msg: >
+      Cannot promote: either no scan report exists or the scan did not pass.
+      Run the scan playbook first:
+        ansible-playbook playbooks/scan.yml -e "ark_storage_root=..."
+      If the scan failed, do NOT promote — investigate the flagged files.
+  when: ark_require_scan | default(true)
+
+# ── Import staged .debs into reprepro ──────────────────────────
+- name: "Import debs into reprepro"
+  ansible.builtin.shell: |
+    set -eo pipefail
+    STAGING="{{ ark_apt_staging_dir }}/{{ item.0.codename }}-{{ item.1 }}"
+    REPO="{{ ark_apt_repo_dir }}"
+    CODENAME="{{ item.0.codename }}"
+
+    if [ ! -d "$STAGING" ] || [ -z "$(ls -A "$STAGING"/*.deb 2>/dev/null)" ]; then
+      echo "No .deb files found in $STAGING — skipping"
+      exit 0
+    fi
+
+    cd "$STAGING"
+    TOTAL=$(ls -1 *.deb 2>/dev/null | wc -l)
+    COUNT=0
+    ADDED=0
+    SKIPPED=0
+
+    for deb in *.deb; do
+      COUNT=$((COUNT + 1))
+      if reprepro -b "$REPO" includedeb "$CODENAME" "$deb" 2>/dev/null; then
+        ADDED=$((ADDED + 1))
+      else
+        SKIPPED=$((SKIPPED + 1))
+      fi
+
+      if [ $((COUNT % 200)) -eq 0 ]; then
+        echo "  Imported $COUNT/$TOTAL..."
+      fi
+    done
+
+    echo "  Done: $ADDED added, $SKIPPED skipped/existing, out of $TOTAL total"
+  args:
+    executable: /bin/bash
+  loop: "{{ ark_distributions | product(ark_architectures) | list }}"
+  loop_control:
+    label: "{{ item.0.codename }}/{{ item.1 }}"
+  register: import_results
+  changed_when: true
+  timeout: 3600
+
+- name: Report import results
+  ansible.builtin.debug:
+    msg: "{{ item.stdout_lines | last | default('no output') }}"
+  loop: "{{ import_results.results }}"
+  loop_control:
+    label: "{{ item.item.0.codename }}/{{ item.item.1 }}"
+
+# ── Update the Ark manifest ───────────────────────────────────
+- name: Generate updated manifest after promotion
+  ansible.builtin.command: >
+    python3 -I {{ ark_storage_root }}/.generate_manifest.py
+      --storage-root {{ ark_storage_root }}
+      --output {{ ark_manifests_dir }}/ark-manifest.json
+      --skip-hashes
+  changed_when: true
+  timeout: 600
+
+# ── Report ─────────────────────────────────────────────────────
+- name: Get repository size
+  ansible.builtin.command: du -sh {{ ark_apt_repo_dir }}
+  register: repo_size
+  changed_when: false
+
+- name: Record promotion timestamp
+  ansible.builtin.lineinfile:
+    path: "{{ ark_storage_root }}/ARK_INFO.txt"
+    line: "Promoted: {{ ansible_date_time.iso8601 }} (scan passed)"
+    create: true
+    mode: "0644"
+
+- name: Display promotion summary
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════╗
+      ║  Promotion Complete                              ║
+      ║  APT repo size: {{ repo_size.stdout.split('\t')[0] }}
+      ║  Scan verified: yes                              ║
+      ║  Packages imported from staging to live repo     ║
+      ╚══════════════════════════════════════════════════╝

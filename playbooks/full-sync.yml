@@ -1,0 +1,89 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ark — Full Sync Playbook                                   ║
+# ║                                                              ║
+# ║  First run, or clean rebuild of the entire offline repo.     ║
+# ║  Downloads everything from scratch.                          ║
+# ║                                                              ║
+# ║  Usage:                                                      ║
+# ║    ansible-playbook playbooks/full-sync.yml                  ║
+# ║                                                              ║
+# ║  To skip specific components:                                ║
+# ║    ansible-playbook playbooks/full-sync.yml --skip-tags pip  ║
+# ║                                                              ║
+# ║  Estimated time: 2-6 hours depending on bandwidth            ║
+# ║  Estimated size: 100-200 GB                                  ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: "Ark — Full Sync"
+  hosts: localhost
+  become: true
+
+  vars:
+    ark_clean: true
+    ark_auto_promote: true   # Quick path — import directly without scan
+
+  pre_tasks:
+    - name: Confirm full sync
+      ansible.builtin.pause:
+        prompt: >-
+          This will download the FULL offline repo to {{ ark_storage_root }}.
+          Existing packages in the APT staging area will be removed and re-downloaded.
+          ISOs and toolchains will be updated in place.
+          Press Enter to continue, or Ctrl-C to abort.
+
+    - name: Check storage mount
+      ansible.builtin.stat:
+        path: "{{ ark_storage_root }}"
+      register: storage_mount
+
+    - name: Verify storage is accessible
+      ansible.builtin.assert:
+        that: storage_mount.stat.exists
+        fail_msg: >
+          {{ ark_storage_root }} does not exist.
+          Mount your storage drive first:
+            sudo mount /dev/sdX1 {{ ark_storage_root }}
+
+    - name: Check available disk space
+      ansible.builtin.command: df -BG --output=avail {{ ark_storage_root }}
+      register: disk_space
+      changed_when: false
+
+    - name: Display available space
+      ansible.builtin.debug:
+        msg: "Available space on {{ ark_storage_root }}: {{ disk_space.stdout_lines[-1] | trim }}"
+
+  roles:
+    - role: setup
+      tags: [setup]
+
+    - role: isos
+      tags: [isos]
+
+    - role: apt_repo
+      tags: [apt]
+
+    - role: toolchains
+      tags: [toolchains]
+
+    - role: pip_cache
+      tags: [pip]
+
+    - role: verify
+      tags: [verify]
+
+  post_tasks:
+    - name: Record sync completion
+      ansible.builtin.lineinfile:
+        path: "{{ ark_storage_root }}/ARK_INFO.txt"
+        line: "Full sync completed: {{ ansible_date_time.iso8601 }}"
+        create: true
+        mode: "0644"
+
+    - name: Final summary
+      ansible.builtin.debug:
+        msg: >-
+          Ark full sync complete! Your offline repo is at {{ ark_storage_root }}.
+          Run 'ansible-playbook playbooks/verify.yml' for a detailed report.
+          To use on a target machine, see scripts/generate-offline-sources.sh.

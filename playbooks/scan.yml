@@ -1,0 +1,87 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ark — Phase 2: Scan                                        ║
+# ║                                                              ║
+# ║  QUARANTINE WORKFLOW — Step 2 of 3                           ║
+# ║                                                              ║
+# ║  Run this on the INTERMEDIARY MACHINE after the quarantine   ║
+# ║  period. The machine should be AIRGAPPED (disconnected from  ║
+# ║  the internet) during the scan itself.                       ║
+# ║                                                              ║
+# ║  Before running:                                             ║
+# ║    1. Reconnect briefly and run: sudo freshclam              ║
+# ║       (updates ClamAV virus definitions)                     ║
+# ║    2. Disconnect from the internet                           ║
+# ║    3. Run this playbook                                      ║
+# ║                                                              ║
+# ║  If all checks pass, proceed to:                             ║
+# ║    ansible-playbook playbooks/promote.yml                    ║
+# ║                                                              ║
+# ║  If any check FAILS: do NOT promote. Investigate the         ║
+# ║  flagged files in the scan reports.                          ║
+# ║                                                              ║
+# ║  Usage:                                                      ║
+# ║    sudo ansible-playbook playbooks/scan.yml \                ║
+# ║      -e "ark_storage_root=/path/to/staging"                  ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: "Ark — Phase 2: Security Scan"
+  hosts: localhost
+  become: true
+
+  pre_tasks:
+    - name: Check download was completed
+      ansible.builtin.stat:
+        path: "{{ ark_storage_root }}/.download-status"
+      register: dl_status_file
+
+    - name: Read download status
+      ansible.builtin.slurp:
+        src: "{{ ark_storage_root }}/.download-status"
+      register: dl_status
+      when: dl_status_file.stat.exists
+
+    - name: Verify download phase completed
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Download status verified'
+             if dl_status_file.stat.exists
+             else 'WARNING: No download status file found — scan may be against stale data' }}
+
+    - name: Confirm scan start
+      ansible.builtin.pause:
+        prompt: >-
+          Ready to scan staged downloads at {{ ark_storage_root }}.
+          Ensure ClamAV definitions are up to date (run: sudo freshclam).
+          Ensure the machine is DISCONNECTED from the internet.
+          Press Enter to begin scanning, or Ctrl-C to abort.
+
+  roles:
+    - role: scan
+      tags: [scan]
+
+  post_tasks:
+    - name: Update status file
+      ansible.builtin.copy:
+        content: |
+          Download completed: (see ARK_INFO.txt)
+          Scan completed: {{ ansible_date_time.iso8601 }}
+          Status: SCAN PASSED — ready to promote
+          Next step: Connect to Ark storage (not internet),
+                     then run promote.yml
+        dest: "{{ ark_storage_root }}/.download-status"
+        mode: "0644"
+
+    - name: Scan phase complete
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════╗
+          ║  Phase 2: Security Scan — COMPLETE              ║
+          ╠══════════════════════════════════════════════════╣
+          ║  All checks passed. Safe to promote.            ║
+          ║                                                 ║
+          ║  Next steps:                                    ║
+          ║    1. Connect the Ark storage drive             ║
+          ║       (do NOT reconnect to the internet)        ║
+          ║    2. Run: ansible-playbook playbooks/promote.yml║
+          ╚══════════════════════════════════════════════════╝

@@ -1,0 +1,149 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Role: apt_repo                                              ║
+# ║  Resolve, download, and build the offline APT repository     ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: Clean staging directory (full-sync mode)
+  ansible.builtin.file:
+    path: "{{ ark_apt_staging_dir }}"
+    state: absent
+  when: ark_clean | default(false)
+
+- name: Recreate staging directories after clean
+  ansible.builtin.file:
+    path: "{{ ark_apt_staging_dir }}/{{ item.0.codename }}-{{ item.1 }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ ark_distributions | product(ark_architectures) | list }}"
+  when: ark_clean | default(false)
+
+# ── Flatten the package groups into a single list ──────────────
+- name: Build combined package list
+  ansible.builtin.set_fact:
+    ark_all_packages: >-
+      {{
+        ark_package_groups.values()
+        | map('list')
+        | flatten
+        | unique
+        | sort
+        | list
+      }}
+
+- name: Report package count
+  ansible.builtin.debug:
+    msg: "Resolving {{ ark_all_packages | length }} unique top-level packages"
+
+# ── Write the package list to a file for the resolver ──────────
+- name: Write package list file
+  ansible.builtin.copy:
+    content: "{{ ark_all_packages | join('\n') }}\n"
+    dest: "{{ ark_manifests_dir }}/requested-packages.txt"
+    mode: "0644"
+
+# ── Copy resolver script to working directory ──────────────────
+- name: Deploy resolver script
+  ansible.builtin.copy:
+    src: resolve_and_download.py
+    dest: "{{ ark_storage_root }}/.resolve_and_download.py"
+    mode: "0755"
+
+# ── Resolve and download for each distro + arch combo ──────────
+- name: "Resolve and download packages"
+  ansible.builtin.command: >
+    python3 -I {{ ark_storage_root }}/.resolve_and_download.py
+      --packages-file {{ ark_manifests_dir }}/requested-packages.txt
+      --output-dir {{ ark_apt_staging_dir }}/{{ item.0.codename }}-{{ item.1 }}
+      --arch {{ item.1 }}
+      --manifest {{ ark_manifests_dir }}/{{ item.0.codename }}-{{ item.1 }}.json
+      --verbose
+  loop: "{{ ark_distributions | product(ark_architectures) | list }}"
+  register: resolve_results
+  changed_when: true
+  # Don't fail the whole run if one arch has issues
+  ignore_errors: true
+  timeout: 7200   # 2 hours per distro/arch — large downloads
+
+- name: Report resolver results
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.0.codename }}/{{ item.item.1 }}:
+      {{ 'OK' if item.rc == 0 else 'ERRORS — check output above' }}
+  loop: "{{ resolve_results.results }}"
+  loop_control:
+    label: "{{ item.item.0.codename }}/{{ item.item.1 }}"
+
+# ── Import .debs into reprepro ─────────────────────────────────
+# In quarantine mode (download.yml → scan.yml → promote.yml),
+# the promote role handles this step. When using the quick path
+# (update.yml / full-sync.yml), import runs here directly.
+# Controlled by ark_auto_promote (set by the playbook).
+
+- name: Clean reprepro database (full-sync mode)
+  ansible.builtin.command: >
+    reprepro -b {{ ark_apt_repo_dir }} clearvanished
+  when:
+    - ark_clean | default(false)
+    - ark_auto_promote | default(false)
+  changed_when: true
+
+- name: "Import debs into reprepro (quick path)"
+  ansible.builtin.shell: |
+    set -eo pipefail
+    STAGING="{{ ark_apt_staging_dir }}/{{ item.0.codename }}-{{ item.1 }}"
+    REPO="{{ ark_apt_repo_dir }}"
+    CODENAME="{{ item.0.codename }}"
+
+    if [ ! -d "$STAGING" ] || [ -z "$(ls -A "$STAGING"/*.deb 2>/dev/null)" ]; then
+      echo "No .deb files found in $STAGING — skipping"
+      exit 0
+    fi
+
+    cd "$STAGING"
+    TOTAL=$(ls -1 *.deb 2>/dev/null | wc -l)
+    COUNT=0
+    ADDED=0
+    SKIPPED=0
+
+    for deb in *.deb; do
+      COUNT=$((COUNT + 1))
+      if reprepro -b "$REPO" includedeb "$CODENAME" "$deb" 2>/dev/null; then
+        ADDED=$((ADDED + 1))
+      else
+        SKIPPED=$((SKIPPED + 1))
+      fi
+
+      if [ $((COUNT % 200)) -eq 0 ]; then
+        echo "  Imported $COUNT/$TOTAL..."
+      fi
+    done
+
+    echo "  Done: $ADDED added, $SKIPPED skipped/existing, out of $TOTAL total"
+  args:
+    executable: /bin/bash
+  loop: "{{ ark_distributions | product(ark_architectures) | list }}"
+  loop_control:
+    label: "{{ item.0.codename }}/{{ item.1 }}"
+  register: import_results
+  changed_when: true
+  timeout: 3600
+  when: ark_auto_promote | default(false)
+
+- name: Skipping import (quarantine mode — use promote.yml after scan)
+  ansible.builtin.debug:
+    msg: >-
+      Packages downloaded to staging. Run scan.yml then promote.yml
+      to import into the live repo.
+  when: not (ark_auto_promote | default(false))
+
+- name: Report repository size
+  ansible.builtin.command: du -sh {{ ark_apt_repo_dir }}
+  register: repo_size
+  changed_when: false
+  when: ark_auto_promote | default(false)
+
+- name: Display repository size
+  ansible.builtin.debug:
+    msg: "APT repository size: {{ repo_size.stdout.split('\t')[0] }}"
+  when: ark_auto_promote | default(false)

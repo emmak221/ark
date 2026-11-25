@@ -1,0 +1,17 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ark — Verification Playbook                                ║
+# ║                                                              ║
+# ║  Read-only check of the repo's integrity and completeness.   ║
+# ║  Run anytime — doesn't download or change anything.          ║
+# ║                                                              ║
+# ║  Usage:                                                      ║
+# ║    ansible-playbook playbooks/verify.yml                     ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: "Ark — Verify"
+  hosts: localhost
+  become: false   # read-only, no root needed
+
+  roles:
+    - role: verify

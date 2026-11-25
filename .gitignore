@@ -1,0 +1,12 @@
+# ── Ark: offline repo ansible project ──
+#
+# Track the config, not the content.
+# The storage/ directory holds ISOs, .debs, and toolchains —
+# hundreds of GB that belong on a drive, not in git.
+
+storage/
+*.retry
+__pycache__/
+*.pyc
+*.pyo
+.vault_pass

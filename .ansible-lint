@@ -1,0 +1,9 @@
+# Ansible-lint configuration for Ark
+#
+# Skip the var-naming prefix rule — this project is small enough
+# that role-prefixed variable names hurt readability more than
+# they help prevent collisions. All other rules remain active,
+# including risky-shell-pipe, no-changed-when, and ignore-errors.
+
+skip_list:
+  - var-naming[no-role-prefix]

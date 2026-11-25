@@ -1,0 +1,122 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ark — Standalone Toolchain Downloads                       ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# These are language toolchains and runtimes distributed as
+# standalone tarballs, not APT packages. They're self-contained
+# and work offline once extracted on the target machine.
+#
+# Update version numbers here before running the update playbook.
+
+ark_toolchains:
+
+  # ── Rust ─────────────────────────────────────────────────────
+  # https://forge.rust-lang.org/infra/other-installation-methods.html
+  # Standalone installers include rustc, cargo, and std.
+  rust:
+    version: "1.82.0"       # Update to latest stable
+    targets:
+      - name: x86_64-unknown-linux-gnu
+        url: "https://static.rust-lang.org/dist/rust-{version}-x86_64-unknown-linux-gnu.tar.xz"
+      - name: aarch64-unknown-linux-gnu
+        url: "https://static.rust-lang.org/dist/rust-{version}-aarch64-unknown-linux-gnu.tar.xz"
+    checksum_url: "https://static.rust-lang.org/dist/rust-{version}-x86_64-unknown-linux-gnu.tar.xz.sha256"
+
+  # ── Go ───────────────────────────────────────────────────────
+  # https://go.dev/dl/
+  go:
+    version: "1.23.3"       # Update to latest stable
+    targets:
+      - name: linux-amd64
+        url: "https://go.dev/dl/go{version}.linux-amd64.tar.gz"
+        checksum_url: "https://go.dev/dl/go{version}.linux-amd64.tar.gz.sha256"
+      - name: linux-arm64
+        url: "https://go.dev/dl/go{version}.linux-arm64.tar.gz"
+        checksum_url: "https://go.dev/dl/go{version}.linux-arm64.tar.gz.sha256"
+
+  # ── Node.js ──────────────────────────────────────────────────
+  # https://nodejs.org/en/download/
+  node:
+    version: "22.11.0"      # LTS — update to latest LTS
+    targets:
+      - name: linux-x64
+        url: "https://nodejs.org/dist/v{version}/node-v{version}-linux-x64.tar.xz"
+        checksum_url: "https://nodejs.org/dist/v{version}/SHASUMS256.txt"
+      - name: linux-arm64
+        url: "https://nodejs.org/dist/v{version}/node-v{version}-linux-arm64.tar.xz"
+        checksum_url: "https://nodejs.org/dist/v{version}/SHASUMS256.txt"
+
+  # ── Zig ──────────────────────────────────────────────────────
+  # https://ziglang.org/download/
+  # Small, self-contained, great for cross-compilation.
+  zig:
+    version: "0.13.0"
+    targets:
+      - name: x86_64-linux
+        url: "https://ziglang.org/download/{version}/zig-linux-x86_64-{version}.tar.xz"
+      - name: aarch64-linux
+        url: "https://ziglang.org/download/{version}/zig-linux-aarch64-{version}.tar.xz"
+
+
+# ── Python wheels cache ───────────────────────────────────────
+# Packages to cache as .whl files for offline pip install.
+# These are downloaded for both x86_64 and aarch64.
+
+ark_pip_packages:
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - requests
+  - flask
+  - django
+  - fastapi
+  - uvicorn
+  - cryptography
+  - paramiko
+  - pyyaml
+  - jinja2
+  - lxml
+  - beautifulsoup4
+  - sqlalchemy
+  - pillow
+  - pyserial
+  - scapy                   # packet crafting
+  - impacket                # network protocol toolkit
+  - pwntools                # CTF / exploit dev
+  - ansible                 # pip version for latest
+  - black                   # code formatter
+  - ruff                    # fast linter
+  - mypy                    # type checker
+  - pytest
+  - ipython
+  - jupyter
+  - notebook
+  - rich                    # terminal formatting
+  - click                   # CLI framework
+  - typer                   # modern CLI framework
+  - httpx
+  - aiohttp
+  - websockets
+  - pyopenssl
+  - netifaces
+  - psutil
+  - docker
+  - fabric                  # SSH automation
+  - boto3                   # might be useful for S3-compatible storage
+  - setuptools
+  - wheel
+  - pip
+  - build
+  - twine
+
+# Python versions to cache wheels for
+ark_pip_python_versions:
+  - "3.12"
+  - "3.11"
+
+# Platforms for wheel downloads
+ark_pip_platforms:
+  - manylinux2014_x86_64
+  - manylinux2014_aarch64

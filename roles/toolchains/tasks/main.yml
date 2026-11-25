@@ -1,0 +1,88 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Role: toolchains                                            ║
+# ║  Download standalone language toolchains and runtimes        ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: Create toolchain directories
+  ansible.builtin.file:
+    path: "{{ ark_toolchain_dir }}/{{ item.key }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ ark_toolchains | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+# ── Rust ───────────────────────────────────────────────────────
+- name: "Download Rust {{ ark_toolchains.rust.version }}"
+  ansible.builtin.get_url:
+    url: "{{ item.url | replace('{version}', ark_toolchains.rust.version) }}"
+    dest: "{{ ark_toolchain_dir }}/rust/rust-{{ ark_toolchains.rust.version }}-{{ item.name }}.tar.xz"
+    mode: "0644"
+    timeout: 600
+  loop: "{{ ark_toolchains.rust.targets }}"
+  loop_control:
+    label: "rust/{{ item.name }}"
+  register: rust_downloads
+  ignore_errors: true
+
+# ── Go ─────────────────────────────────────────────────────────
+- name: "Download Go {{ ark_toolchains.go.version }}"
+  ansible.builtin.get_url:
+    url: "{{ item.url | replace('{version}', ark_toolchains.go.version) }}"
+    dest: "{{ ark_toolchain_dir }}/go/go{{ ark_toolchains.go.version }}.{{ item.name }}.tar.gz"
+    mode: "0644"
+    timeout: 600
+  loop: "{{ ark_toolchains.go.targets }}"
+  loop_control:
+    label: "go/{{ item.name }}"
+  register: go_downloads
+  ignore_errors: true
+
+# ── Node.js ────────────────────────────────────────────────────
+- name: "Download Node.js {{ ark_toolchains.node.version }}"
+  ansible.builtin.get_url:
+    url: "{{ item.url | replace('{version}', ark_toolchains.node.version) }}"
+    dest: "{{ ark_toolchain_dir }}/node/node-v{{ ark_toolchains.node.version }}-{{ item.name }}.tar.xz"
+    mode: "0644"
+    timeout: 600
+  loop: "{{ ark_toolchains.node.targets }}"
+  loop_control:
+    label: "node/{{ item.name }}"
+  register: node_downloads
+  ignore_errors: true
+
+# ── Zig ────────────────────────────────────────────────────────
+- name: "Download Zig {{ ark_toolchains.zig.version }}"
+  ansible.builtin.get_url:
+    url: "{{ item.url | replace('{version}', ark_toolchains.zig.version) }}"
+    dest: "{{ ark_toolchain_dir }}/zig/zig-{{ item.name }}-{{ ark_toolchains.zig.version }}.tar.xz"
+    mode: "0644"
+    timeout: 600
+  loop: "{{ ark_toolchains.zig.targets }}"
+  loop_control:
+    label: "zig/{{ item.name }}"
+  register: zig_downloads
+  ignore_errors: true
+
+# ── Report ─────────────────────────────────────────────────────
+- name: Collect download results
+  ansible.builtin.set_fact:
+    toolchain_summary:
+      rust: "{{ rust_downloads.results | selectattr('failed', 'equalto', false) | list | length }}/{{ ark_toolchains.rust.targets | length }}"
+      go: "{{ go_downloads.results | selectattr('failed', 'equalto', false) | list | length }}/{{ ark_toolchains.go.targets | length }}"
+      node: "{{ node_downloads.results | selectattr('failed', 'equalto', false) | list | length }}/{{ ark_toolchains.node.targets | length }}"
+      zig: "{{ zig_downloads.results | selectattr('failed', 'equalto', false) | list | length }}/{{ ark_toolchains.zig.targets | length }}"
+
+- name: Report toolchain downloads
+  ansible.builtin.debug:
+    msg: "Toolchain downloads — {{ toolchain_summary }}"
+
+- name: Report toolchain directory size
+  ansible.builtin.command: du -sh {{ ark_toolchain_dir }}
+  register: toolchain_size
+  changed_when: false
+
+- name: Display toolchain size
+  ansible.builtin.debug:
+    msg: "Toolchain archive size: {{ toolchain_size.stdout.split('\t')[0] }}"

@@ -1,0 +1,103 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ark — Phase 1: Download                                    ║
+# ║                                                              ║
+# ║  QUARANTINE WORKFLOW — Step 1 of 3                           ║
+# ║                                                              ║
+# ║  Run this on the INTERMEDIARY MACHINE while connected to     ║
+# ║  the internet. Downloads new/updated packages, ISOs,         ║
+# ║  toolchains, and pip wheels to the staging area.             ║
+# ║                                                              ║
+# ║  After this completes:                                       ║
+# ║    1. DISCONNECT from the internet                           ║
+# ║    2. Wait the quarantine period (1-2 weeks recommended)     ║
+# ║    3. Briefly reconnect ONLY to run: sudo freshclam          ║
+# ║    4. Disconnect again                                       ║
+# ║    5. Run: ansible-playbook playbooks/scan.yml               ║
+# ║                                                              ║
+# ║  Usage:                                                      ║
+# ║    sudo ansible-playbook playbooks/download.yml \            ║
+# ║      -e "ark_storage_root=/path/to/staging"                  ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: "Ark — Phase 1: Download"
+  hosts: localhost
+  become: true
+
+  vars:
+    ark_clean: false
+
+  pre_tasks:
+    - name: Check storage is accessible
+      ansible.builtin.stat:
+        path: "{{ ark_storage_root }}"
+      register: storage_check
+
+    - name: Create storage root if needed
+      ansible.builtin.file:
+        path: "{{ ark_storage_root }}"
+        state: directory
+        mode: "0755"
+      when: not storage_check.stat.exists
+
+    - name: Record download start
+      ansible.builtin.copy:
+        content: |
+          Download started: {{ ansible_date_time.iso8601 }}
+          Status: IN PROGRESS — do not scan or promote yet
+        dest: "{{ ark_storage_root }}/.download-status"
+        mode: "0644"
+
+  roles:
+    - role: setup
+      tags: [setup]
+
+    - role: manifest
+      tags: [manifest]
+      vars:
+        ark_manifest_skip_hashes: true  # fast pre-download manifest
+
+    - role: isos
+      tags: [isos]
+
+    - role: apt_repo
+      tags: [apt]
+
+    - role: toolchains
+      tags: [toolchains]
+
+    - role: pip_cache
+      tags: [pip]
+
+  post_tasks:
+    - name: Generate staging manifest (for scan phase)
+      ansible.builtin.command: >
+        python3 -I {{ ark_storage_root }}/.generate_manifest.py
+          --storage-root {{ ark_storage_root }}
+          --output {{ ark_manifests_dir }}/staging-manifest.json
+          --staging-only
+      changed_when: true
+
+    - name: Record download complete
+      ansible.builtin.copy:
+        content: |
+          Download completed: {{ ansible_date_time.iso8601 }}
+          Status: READY FOR QUARANTINE
+          Next step: Disconnect from internet, wait quarantine period,
+                     then run scan.yml
+        dest: "{{ ark_storage_root }}/.download-status"
+        mode: "0644"
+
+    - name: Download phase complete
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════╗
+          ║  Phase 1: Download — COMPLETE                   ║
+          ╠══════════════════════════════════════════════════╣
+          ║  Next steps:                                    ║
+          ║    1. Disconnect from the internet              ║
+          ║    2. Wait quarantine period (1-2 weeks)        ║
+          ║    3. Reconnect briefly, run: sudo freshclam    ║
+          ║    4. Disconnect again                          ║
+          ║    5. Run: ansible-playbook playbooks/scan.yml  ║
+          ╚══════════════════════════════════════════════════╝

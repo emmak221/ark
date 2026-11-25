@@ -1,0 +1,98 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Role: pip_cache                                             ║
+# ║  Download Python wheels for offline pip install              ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# Downloads wheels for both x86_64 and aarch64 so pip install
+# works offline on either architecture. Uses pip's --download
+# with --platform flags to get the right binary wheels.
+
+- name: Ensure pip3 is available
+  ansible.builtin.apt:
+    name: python3-pip
+    state: present
+
+- name: Create pip cache directories
+  ansible.builtin.file:
+    path: "{{ ark_pip_cache_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ ark_pip_platforms }}"
+
+# ── Download wheels for each platform ──────────────────────────
+- name: "Download pip wheels"
+  ansible.builtin.command: >
+    pip3 download
+      --dest {{ ark_pip_cache_dir }}/{{ item }}
+      --platform {{ item }}
+      --python-version {{ ark_pip_python_versions | first }}
+      --only-binary=:all:
+      --no-deps
+      {{ ark_pip_packages | join(' ') }}
+  loop: "{{ ark_pip_platforms }}"
+  register: pip_platform_downloads
+  changed_when: true
+  ignore_errors: true
+  timeout: 1800
+
+# ── Also download source distributions as fallback ─────────────
+# Some packages don't have binary wheels for all platforms.
+# Source distributions (sdist) can be built on the target machine
+# if a compiler is available (which our APT repo provides).
+- name: Create sdist cache directory
+  ansible.builtin.file:
+    path: "{{ ark_pip_cache_dir }}/sdist"
+    state: directory
+    mode: "0755"
+
+- name: Download source distributions (fallback for missing wheels)
+  ansible.builtin.command: >
+    pip3 download
+      --dest {{ ark_pip_cache_dir }}/sdist
+      --no-binary=:all:
+      {{ ark_pip_packages | join(' ') }}
+  register: pip_sdist_download
+  changed_when: true
+  ignore_errors: true
+  timeout: 1800
+
+# ── Download with full dependency resolution ───────────────────
+# The above --no-deps downloads are fast but incomplete.
+# This pass grabs everything with deps for the native platform.
+- name: Create full-deps cache directory
+  ansible.builtin.file:
+    path: "{{ ark_pip_cache_dir }}/full"
+    state: directory
+    mode: "0755"
+
+- name: Download wheels with full dependencies (native platform)
+  ansible.builtin.command: >
+    pip3 download
+      --dest {{ ark_pip_cache_dir }}/full
+      {{ ark_pip_packages | join(' ') }}
+  register: pip_full_download
+  changed_when: true
+  ignore_errors: true
+  timeout: 1800
+
+# ── Report ─────────────────────────────────────────────────────
+- name: Count cached wheels
+  ansible.builtin.find:
+    paths: "{{ ark_pip_cache_dir }}"
+    patterns: "*.whl,*.tar.gz,*.zip"
+    recurse: true
+  register: pip_files
+
+- name: Report pip cache size
+  ansible.builtin.command: du -sh {{ ark_pip_cache_dir }}
+  register: pip_size
+  changed_when: false
+
+- name: Display pip cache info
+  ansible.builtin.debug:
+    msg: >-
+      Pip cache: {{ pip_files.matched }} files,
+      {{ pip_size.stdout.split('\t')[0] }} total.
+      Install offline with:
+      pip install --no-index --find-links=/path/to/pip-cache/full <package>
